@@ -30,7 +30,6 @@ static int format_json_name (char *buffer, size_t buffer_size, /* {{{ */
     const value_list_t *vl)
 {
   size_t offset = 0;
-
   size_t check_offset = 0;
   char check[512];
   size_t check_size = sizeof (check);
@@ -38,28 +37,24 @@ static int format_json_name (char *buffer, size_t buffer_size, /* {{{ */
   memset (buffer, 0, buffer_size);
   memset (check, 0, check_size);
 
-  /*
-  //if (strcmp(__VA_ARGS__, '.') == 1) { \
-
-*/
-
 #define BUFFER_ADD(...) do { \
   int status; \
   status = ssnprintf (check + check_offset, check_size - check_offset, \
       __VA_ARGS__); \
   /*printf("%zu %s\n", strlen(check), check); */ \
   if (strlen(check) > 1) { \
-  status = ssnprintf (buffer + offset, buffer_size - offset, \
-      __VA_ARGS__); \
-  if (status < 1) \
-    return (-1); \
-  else if (((size_t) status) >= (buffer_size - offset)) \
-    return (-ENOMEM); \
-  else \
-    offset += ((size_t) status); \
+    status = ssnprintf (buffer + offset, buffer_size - offset, \
+        __VA_ARGS__); \
+    if (status < 1) \
+      return (-1); \
+    else if (((size_t) status) >= (buffer_size - offset)) \
+      return (-ENOMEM); \
+    else \
+      offset += ((size_t) status); \
   } \
 } while (0)
 
+  /* FIXME: sometimes plugin_instance is optional. prepend the dot */
   BUFFER_ADD ("%s.", vl->plugin);
   BUFFER_ADD ("%s.", vl->plugin_instance);
   BUFFER_ADD ("%s.", vl->type);
@@ -421,12 +416,25 @@ static int value_list_to_json (char *buffer, size_t buffer_size, /* {{{ */
   else
   {
 
+  size_t check_offset = 0;
+  char check[512];
+  size_t check_size = sizeof (check);
+  memset (check, 0, check_size);
+
 /* FIXME: emit empty values as nulls */
 #define BUFFER_ADD_ESCAPED(value) do { \
-  status = escape_string (temp, sizeof (temp), (value)); \
-  if (status != 0) \
-    return (status); \
-  BUFFER_ADD ("%s,", temp); \
+  int status; \
+  status = ssnprintf (check + check_offset, check_size - check_offset, \
+      "%s", value); \
+  if (strlen(check) > 0) { \
+    status = escape_string (temp, sizeof (temp), (value)); \
+    if (status != 0) \
+      return (status); \
+    BUFFER_ADD ("%s,", temp); \
+  } else { \
+    /* FIXME: unlike the docs, null JSON values aren't actually supported in InfluxDB :-/ */ \
+    BUFFER_ADD ("\"null\","); \
+  } \
 } while (0)
 
   BUFFER_ADD (",{");
