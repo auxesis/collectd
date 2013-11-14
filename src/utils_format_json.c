@@ -421,7 +421,6 @@ static int value_list_to_json (char *buffer, size_t buffer_size, /* {{{ */
   size_t check_size = sizeof (check);
   memset (check, 0, check_size);
 
-/* FIXME: emit empty values as nulls */
 #define BUFFER_ADD_ESCAPED(value) do { \
   int status; \
   status = ssnprintf (check + check_offset, check_size - check_offset, \
@@ -432,7 +431,7 @@ static int value_list_to_json (char *buffer, size_t buffer_size, /* {{{ */
       return (status); \
     BUFFER_ADD ("%s,", temp); \
   } else { \
-    /* FIXME: unlike the docs, null JSON values aren't actually supported in InfluxDB :-/ */ \
+    /* FIXME: null currently written as string, until influxdb#53 is fixed */ \
     BUFFER_ADD ("\"null\","); \
   } \
 } while (0)
