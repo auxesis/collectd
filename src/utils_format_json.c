@@ -27,7 +27,7 @@
 #include "utils_format_json.h"
 
 static int format_json_name (char *buffer, size_t buffer_size, /* {{{ */
-    const value_list_t *vl)
+    const value_list_t *vl, const data_source_t ds)
 {
   size_t offset = 0;
   size_t check_offset = 0;
@@ -59,6 +59,11 @@ static int format_json_name (char *buffer, size_t buffer_size, /* {{{ */
   BUFFER_ADD ("%s.", vl->plugin_instance);
   BUFFER_ADD ("%s.", vl->type);
   BUFFER_ADD ("%s", vl->type_instance);
+
+  if (strcmp(ds.name, "value") != 0)
+  {
+    BUFFER_ADD ("%s", ds.name);
+  }
 
 #undef BUFFER_ADD
 
@@ -186,6 +191,76 @@ static int values_to_json (char *buffer, size_t buffer_size, /* {{{ */
 #undef BUFFER_ADD
 
   DEBUG ("format_json: values_to_json: buffer = %s;", buffer);
+  sfree(rates);
+  return (0);
+} /* }}} int values_to_json */
+
+static int value_to_json (char *buffer, size_t buffer_size, /* {{{ */
+                const data_set_t *ds, const value_list_t *vl, int store_rates, int i)
+{
+  size_t offset = 0;
+  gauge_t *rates = NULL;
+
+  memset (buffer, 0, buffer_size);
+
+#define BUFFER_ADD(...) do { \
+  int status; \
+  status = ssnprintf (buffer + offset, buffer_size - offset, \
+      __VA_ARGS__); \
+  if (status < 1) \
+  { \
+    sfree(rates); \
+    return (-1); \
+  } \
+  else if (((size_t) status) >= (buffer_size - offset)) \
+  { \
+    sfree(rates); \
+    return (-ENOMEM); \
+  } \
+  else \
+    offset += ((size_t) status); \
+} while (0)
+
+  if (ds->ds[i].type == DS_TYPE_GAUGE)
+  {
+    if(isfinite (vl->values[i].gauge))
+      BUFFER_ADD ("%g", vl->values[i].gauge);
+    else
+      BUFFER_ADD ("null");
+  }
+  else if (store_rates)
+  {
+    if (rates == NULL)
+      rates = uc_get_rate (ds, vl);
+    if (rates == NULL)
+    {
+      WARNING ("utils_format_json: uc_get_rate failed.");
+      sfree(rates);
+      return (-1);
+    }
+
+    if(isfinite (rates[i]))
+      BUFFER_ADD ("%g", rates[i]);
+    else
+      BUFFER_ADD ("null");
+  }
+  else if (ds->ds[i].type == DS_TYPE_COUNTER)
+    BUFFER_ADD ("%llu", vl->values[i].counter);
+  else if (ds->ds[i].type == DS_TYPE_DERIVE)
+    BUFFER_ADD ("%"PRIi64, vl->values[i].derive);
+  else if (ds->ds[i].type == DS_TYPE_ABSOLUTE)
+    BUFFER_ADD ("%"PRIu64, vl->values[i].absolute);
+  else
+  {
+    ERROR ("format_json: Unknown data source type: %i",
+        ds->ds[i].type);
+    sfree (rates);
+    return (-1);
+  }
+
+#undef BUFFER_ADD
+
+  DEBUG ("format_json: value_to_json: buffer = %s;", buffer);
   sfree(rates);
   return (0);
 } /* }}} int values_to_json */
@@ -436,30 +511,34 @@ static int value_list_to_json (char *buffer, size_t buffer_size, /* {{{ */
   } \
 } while (0)
 
-  BUFFER_ADD (",{");
-  status = format_json_name (temp, sizeof (temp), vl);
-  if (status != 0)
-    return (status);
+  int i;
+  for (i = 0; i < ds->ds_num; i++)
+  {
 
-  BUFFER_ADD ("\"name\":\"%s\",", temp);
-  BUFFER_ADD ("\"columns\":[\"host\",\"plugin\",\"plugin_instance\",\"type\",\"type_instance\",\"value\",\"time\"],");
-  BUFFER_ADD ("\"points\":[[");
-  BUFFER_ADD_ESCAPED (vl->host);
-  BUFFER_ADD_ESCAPED (vl->plugin);
-  BUFFER_ADD_ESCAPED (vl->plugin_instance);
-  BUFFER_ADD_ESCAPED (vl->type);
-  BUFFER_ADD_ESCAPED (vl->type_instance);
+    BUFFER_ADD (",{");
+    status = format_json_name (temp, sizeof (temp), vl, ds->ds[i]);
+    if (status != 0)
+      return (status);
 
+    BUFFER_ADD ("\"name\":\"%s\",", temp);
+    BUFFER_ADD ("\"columns\":[\"host\",\"plugin\",\"plugin_instance\",\"type\",\"type_instance\",\"value\",\"time\"],");
+    BUFFER_ADD ("\"points\":[[");
+    BUFFER_ADD_ESCAPED (vl->host);
+    BUFFER_ADD_ESCAPED (vl->plugin);
+    BUFFER_ADD_ESCAPED (vl->plugin_instance);
+    BUFFER_ADD_ESCAPED (vl->type);
+    BUFFER_ADD_ESCAPED (vl->type_instance);
 
-  status = values_to_json (temp, sizeof (temp), ds, vl, store_rates);
-  if (status != 0)
-    return (status);
-  //BUFFER_ADD ("%s,", temp);
-  BUFFER_ADD ("0,");
+    status = value_to_json (temp, sizeof (temp), ds, vl, store_rates, i);
+    if (status != 0)
+      return (status);
+    BUFFER_ADD ("%s,", temp);
 
-  BUFFER_ADD ("%.0f", (CDTIME_T_TO_DOUBLE (vl->time) * 1000));
-  BUFFER_ADD ("]]");
-  BUFFER_ADD ("}");
+    BUFFER_ADD ("%.0f", (CDTIME_T_TO_DOUBLE (vl->time) * 1000));
+    BUFFER_ADD ("]]");
+    BUFFER_ADD ("}");
+
+  } /* for ds->ds_num */
   }
 
 #undef BUFFER_ADD_KEYVAL
