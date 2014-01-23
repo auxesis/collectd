@@ -54,16 +54,7 @@ static int format_json_name (char *buffer, size_t buffer_size, /* {{{ */
   } \
 } while (0)
 
-  /* FIXME: sometimes plugin_instance is optional. prepend the dot */
-  BUFFER_ADD ("%s.", vl->plugin);
-  BUFFER_ADD ("%s.", vl->plugin_instance);
-  BUFFER_ADD ("%s.", vl->type);
-  BUFFER_ADD ("%s", vl->type_instance);
-
-  if (strcmp(ds.name, "value") != 0)
-  {
-    BUFFER_ADD ("%s", ds.name);
-  }
+  BUFFER_ADD("%s", vl->host);
 
 #undef BUFFER_ADD
 
@@ -440,6 +431,8 @@ static int value_list_to_json (char *buffer, size_t buffer_size, /* {{{ */
 } while (0)
 
   if (0 == 1) {
+  // start of previous value list formatting code
+
   /* All value lists have a leading comma. The first one will be replaced with
    * a square bracket in `format_json_finalize'. */
   BUFFER_ADD (",{");
@@ -487,9 +480,13 @@ static int value_list_to_json (char *buffer, size_t buffer_size, /* {{{ */
   } /* if (vl->meta != NULL) */
 
   BUFFER_ADD ("}");
+  // end of previous value list formatting code
   }
   else
   {
+
+  // start of InfluxDB output value list formatting code
+  // FIXME this should be hedged behind a configuration option Format=InfluxDB
 
   size_t check_offset = 0;
   char check[512];
@@ -506,8 +503,7 @@ static int value_list_to_json (char *buffer, size_t buffer_size, /* {{{ */
       return (status); \
     BUFFER_ADD ("%s,", temp); \
   } else { \
-    /* FIXME: null currently written as string, until influxdb#53 is fixed */ \
-    BUFFER_ADD ("\"null\","); \
+    BUFFER_ADD ("null,"); \
   } \
 } while (0)
 
@@ -520,14 +516,27 @@ static int value_list_to_json (char *buffer, size_t buffer_size, /* {{{ */
     if (status != 0)
       return (status);
 
-    BUFFER_ADD ("\"name\":\"%s\",", temp);
-    BUFFER_ADD ("\"columns\":[\"host\",\"plugin\",\"plugin_instance\",\"type\",\"type_instance\",\"value\",\"time\"],");
-    BUFFER_ADD ("\"points\":[[");
-    BUFFER_ADD_ESCAPED (vl->host);
-    BUFFER_ADD_ESCAPED (vl->plugin);
-    BUFFER_ADD_ESCAPED (vl->plugin_instance);
-    BUFFER_ADD_ESCAPED (vl->type);
-    BUFFER_ADD_ESCAPED (vl->type_instance);
+    BUFFER_ADD ("\"name\":\"%s\",\"columns\":[", temp);
+
+    // The values should be empty strings if untouched, but paranoids prosper
+    _Bool use_plugin          = (vl->plugin != NULL) && (strlen(vl->plugin) > 0);
+    _Bool use_plugin_instance = (vl->plugin_instance != NULL) &&
+                                (strlen(vl->plugin_instance) > 0);
+    _Bool use_type            = (vl->type != NULL) && (strlen(vl->type) > 0);
+    _Bool use_type_instance   = (vl->type_instance != NULL) &&
+                                (strlen(vl->type_instance) > 0);
+
+    if ( use_plugin )          { BUFFER_ADD ("\"plugin\",");               }
+    if ( use_plugin_instance ) { BUFFER_ADD ("\"plugin_instance\",");      }
+    if ( use_type )            { BUFFER_ADD ("\"type\",");                 }
+    if ( use_type_instance )   { BUFFER_ADD ("\"type_instance\",");        }
+
+    BUFFER_ADD ("\"value\",\"time\"],\"points\":[[");
+
+    if ( use_plugin )          { BUFFER_ADD_ESCAPED (vl->plugin);          }
+    if ( use_plugin_instance ) { BUFFER_ADD_ESCAPED (vl->plugin_instance); }
+    if ( use_type )            { BUFFER_ADD_ESCAPED (vl->type);            }
+    if ( use_type_instance )   { BUFFER_ADD_ESCAPED (vl->type_instance);   }
 
     status = value_to_json (temp, sizeof (temp), ds, vl, store_rates, i);
     if (status != 0)
